@@ -1,79 +1,101 @@
 import requests
+import random
 from flask import Flask, jsonify, request
-import time
+import json
+import os
+import base64
+
+class GameInfo:
+    def __init__(self):
+        self.TitleId: str = "1FF85D" # Playfab Title Id
+        self.SecretKey: str = "681HOGI5NYC8763THFWEZKRR5SK4RE87KIHNKCE4PCJHHYFJ1H" # Playfab Secret Key
+        self.ApiKey: str = "1185266791334586|4524d0320ec15915a12d105165731434" # App Api Key
+
+    def get_auth_headers(self):
+        return {"content-type": "application/json", "X-SecretKey": self.SecretKey}
+
+
+settings = GameInfo()
 app = Flask(__name__)
-title = "1FF85D"
-secret = "681HOGI5NYC8763THFWEZKRR5SK4RE87KIHNKCE4PCJHHYFJ1H"   
-def GetUserId(ticket):return ticket[:16].replace("'", "").replace("-", "").replace(".", "")
-def Headers():return {"content-type": "application/json", "X-SecretKey": secret}
-def OculusValidationMadeByQwizx(ocid, nonce):
-    keys = ["1185266791334586|4524d0320ec15915a12d105165731434| | stuff here, IF YOU HAVE MULTIPLE APPLABS ADD THEM LIKE THIS: "OC| |", "OC| |" "]
-    for token in keys:
-        try:
-            url = f"https://graph.oculus.com/{ocid}?access_token={token}"
-            response = requests.get(url, headers={"Content-Type": "application/json"})
-            data = response.json()
-            if 'id' in data:return True
-            if 'error' in data:
-                message = data['error'].get('message')
-                if "Invalid OAuth access token - Cannot parse access token" in message:continue
-            url = "https://graph.oculus.com/user_nonce_validate"
-            response = requests.post(url, json={"nonce": nonce, "access_token": token})
-            data = response.json()
-            if data.get("is_valid") == "true":return True
-            if 'error' in data:
-                message = data['error'].get('message')
-                if "Invalid OAuth access token - Cannot parse access token" in message:
-                    continue
-        except Exception as e:
-            print(e)
-    print("invalid")
-    return False
-@app.route("/photon", methods=["GET", "POST"])
-def PhotonMadeByQwizx():
-    data = request.get_json(silent=True) or request.args
-    data = {k.lower(): v for k, v in data.items()}
-    ticket = data.get("ticket") or data.get("username")
-    nonce = data.get("nonce")
-    titleid = data.get("appid")
-    token = data.get("token")
-    pid = GetUserId(ticket)
-    if titleid != title: return jsonify({"error":"no"}), 403
-    print(f"{data}")
-    if not ticket:return jsonify({"error":"NO"}), 403
-    if not nonce:return jsonify({"error":"NO"}), 403
-    return jsonify({"ResultCode": 1,"StatusCode": 200, "UserId": pid, "AppId": titleid, "Ticket": ticket, "Token": token,"Nonce": nonce})
+
+def ReturnFunctionJson(data, funcname, funcparam={}):
+    rjson = data["FunctionParameter"]
+    userId: str = rjson.get("CallerEntityProfile").get("Lineage").get(
+        "TitlePlayerAccountId")
+
+    req = requests.post(
+        url=f"https://{settings.TitleId}.playfabapi.com/Server/ExecuteCloudScript",
+        json={
+            "PlayFabId": userId,
+            "FunctionName": funcname,
+            "FunctionParameter": funcparam
+        },
+        headers=settings.GetAuthHeaders())
+
+    if req.status_code == 200:
+        return jsonify(
+            req.json().get("data").get("FunctionResult")), req.status_code
+    else:
+        return jsonify({}), req.status_code
+
+
+def GetIsNonceValid(nonce: str, oculusId: str):
+    req = requests.post(
+        url=f'https://graph.oculus.com/user_nonce_validate?nonce=' + nonce +
+        '&user_id=' + oculusId + '&access_token=' + settings.ApiKey,
+        headers={"content-type": "application/json"})
+    return req.json().get("is_valid")
+
+
+@app.route("/", methods=["POST", "GET"])
+def main():
+    return """
+        <html>
+            <head>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+            </head>
+            <body style="font-family: 'Inter', sans-serif;">
+                <h1 style="color: red; font-size: 30px;">
+                    sup gango! -laxlep
+                </h1>
+            </body>
+        </html>
+    """
+
 @app.route("/api/PlayFabAuthentication", methods=["POST"])
-def PlayFabAuthentcationMadeByQwizx():
-    data = request.get_json()
-    oculus_id = data.get("OculusId")
-    nonce = data.get("Nonce")
-    if not data.get("Platform") == "Quest":return jsonify({"Message": "scary hacker!!"}), 403
-    if not oculus_id or not OculusValidationMadeByQwizx(oculus_id, nonce):
-        print("no nonce or ocid")
-        return jsonify({"error": "no way brotein shake"}), 403
-    lr = requests.post(url=f"https://{title}.playfabapi.com/Server/LoginWithServerCustomId",json={"ServerCustomId": f"OCULUS{oculus_id}","CreateAccount": True},headers=Headers())
-    if lr.status_code == 200:
-        d = lr.json().get("data")
-        requests.post(url=f"https://{title}.playfabapi.com/Client/LinkCustomID",json={"CustomId": f"OCULUS{oculus_id}", "ForceLink": True},headers={"content-type": "application/json","x-authorization": d.get("SessionTicket")})
-        print({"PlayFabId": d.get("PlayFabId"), "SessionTicket": d.get("SessionTicket"), "EntityToken": d.get("EntityToken", {}).get("EntityToken"), "EntityId": d.get("EntityToken", {}).get("Entity", {}).get("Id"), "EntityType": d.get("EntityToken", {}).get("Entity", {}).get("Type")}) 
-        return jsonify({"PlayFabId": d.get("PlayFabId"),"SessionTicket": d.get("SessionTicket"),"EntityToken": d.get("EntityToken", {}).get("EntityToken"), "EntityId": d.get("EntityToken", {}).get("Entity", {}).get("Id"),"EntityType": d.get("EntityToken", {}).get("Entity", {}).get("Type")}), 200
-    if lr.status_code == 403:
-        data = lr.json()
-    if data.get("errorCode") == 1002:
-        reason, times = next(iter(data.get("errorDetails", {}).items()), ("no reason ?", []))
-        print(reason)
-        return jsonify({"BanMessage": reason,"BanExpirationTime": times[0] if times else "no expo ?"}), 403
-@app.route("/cbfn", methods=["POST"])
-def CheckForBadNameMadeByQwizx():return jsonify({"result": 0})
-@app.route("/t", methods=["POST", "GET"])
-def TitleDataMadeByQwizx():
-    res = requests.post(f"https://{title}.playfabapi.com/Server/GetTitleData", headers=Headers())
-    data = res.json().get("data", {}).get("Data", {})
-    def n(obj):
-        if isinstance(obj, dict):return {k: n(v) for k, v in obj.items()}
-        elif isinstance(obj, list):return [n(i) for i in obj]
-        elif isinstance(obj, str):return obj.replace("\\n", "\n")
-        else:return obj
-    f = n(data)
-    return jsonify(f)
+def playfab_authentication():
+    rjson = request.get_json()
+    required_fields = ["Nonce", "AppId", "Platform", "OculusId"]
+    missing_fields = [field for field in required_fields if not rjson.get(field)]
+
+    if missing_fields:
+        return (
+            jsonify(
+                {
+                    "Message": f"Missing parameter(s): {', '.join(missing_fields)}",
+                    "Error": f"BadRequest-No{missing_fields[0]}",
+                }
+            ),
+            401,
+        )
+
+    if rjson.get("AppId") != settings.TitleId:
+        return (
+            jsonify(
+                {
+                    "Message": "Request sent for the wrong App ID",
+                    "Error": "BadRequest-AppIdMismatch",
+                }
+            ),
+            400,
+        )
+
+    url = f"https://{settings.TitleId}.playfabapi.com/Server/LoginWithServerCustomId"
+    login_request = requests.post(
+        url=url,
+        json={
+            "ServerCustomId": "OCULUS" + rjson.get("OculusId"),
+            "CreateAccount": True,
+        },
+        headers=settings.get_auth_headers(),
+... (363 lines left)
